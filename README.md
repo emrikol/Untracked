@@ -8,6 +8,12 @@ it gets out of the way.
 [![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 ![Platform](https://img.shields.io/badge/macOS-15%2B%20(Apple%20silicon)-lightgrey)
 
+![Untracked pulsing the menu-bar strip, then the screen border](docs/demo.gif)
+
+<sub>Mockup, not a screenshot — the heartbeat curve, colour and opacities are the
+app's real values, but the pacing is compressed. The real beat is 0.7 s once
+every 8 s.</sub>
+
 The overlay is click-through, so it never blocks what you're doing. Detection is
 local: Untracked reads the Toggl Track app's own database on your Mac. No API
 token, no account, no network.

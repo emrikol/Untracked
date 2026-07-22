@@ -175,20 +175,32 @@ jobs:
             releases/
 
           # Carry forward whatever is already published. A 404 is the expected
-          # first-release case and must not fail the job; any other curl failure
-          # would silently drop history, so it is fatal.
-          if curl -fsS -o old-appcast.xml "https://emrikol.github.io/Untracked/appcast.xml"; then
-            scripts/merge-appcast.py releases/appcast.xml old-appcast.xml appcast.xml
-          else
-            status=$?
-            if [[ "$status" -eq 22 ]]; then
+          # first-release case and must not fail the job; anything else would
+          # silently drop release history, so it is fatal.
+          #
+          # Branch on the HTTP status, not on curl's exit code. The first
+          # attempt at this keyed on `curl --fail` returning 22 for "not found",
+          # and the real 404 came back as 56 instead — --fail reports the
+          # transfer error rather than a fixed not-found code depending on when
+          # the failure surfaces (HTTP/2 here). The status code is the thing
+          # actually being asked about, so ask for it directly.
+          http=$(curl -sS -o old-appcast.xml -w '%{http_code}' \
+            "https://emrikol.github.io/Untracked/appcast.xml" || echo "000")
+          case "$http" in
+            200)
+              scripts/merge-appcast.py releases/appcast.xml old-appcast.xml appcast.xml
+              ;;
+            404)
+              # Also the expected state until Pages is enabled, which cannot
+              # happen until this job first creates the gh-pages branch.
               echo "no published appcast yet — first release"
               scripts/merge-appcast.py releases/appcast.xml - appcast.xml
-            else
-              echo "::error::could not fetch the published appcast (curl exit $status)"
+              ;;
+            *)
+              echo "::error::unexpected HTTP $http fetching the published appcast"
               exit 1
-            fi
-          fi
+              ;;
+          esac
 
           # The appcast is the file that decides whether anyone gets this update.
           # Print it: it is small, and it is the first thing to look at when an

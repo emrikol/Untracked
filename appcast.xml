@@ -1,7 +1,16 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
-        <title>Untracked</title>
+        <item>
+            <title>0.1.1</title>
+            <pubDate>Wed, 22 Jul 2026 22:55:58 +0000</pubDate>
+            <sparkle:version>1001</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/emrikol/Untracked/releases/download/v0.1.1/Untracked-0.1.1.zip" length="1168994" type="application/octet-stream" sparkle:edSignature="BKei799oA9Ib3I6KiDVypEA82clTgtUKJRMvjUN0ZPVkSBeosIKTZBgoCNyb6cS/oWewLtP2KI4Me5nZWOzXBg==" />
+        </item>
+    <title>Untracked</title>
         <item>
             <title>0.1.0</title>
             <pubDate>Wed, 22 Jul 2026 22:47:04 +0000</pubDate>

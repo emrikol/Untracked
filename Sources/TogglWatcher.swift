@@ -1,5 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import CoreServices
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.emrikol.Untracked", category: "watcher")
+
+/// What prompted a read, so a dead FSEvents stream can be told from a live one.
+internal enum RefreshSource {
+    /// FSEvents delivered — the stream is doing its job.
+    case event
+    /// The 120 s backstop timer fired.
+    case fallback
+    /// The authoritative read taken when monitoring starts.
+    case initial
+}
 
 /// Event-driven watcher for Toggl's local store. Instead of polling on a timer,
 /// it uses FSEvents to wake only when Toggl actually writes to its database
@@ -35,6 +49,26 @@ internal final class TogglWatcher: @unchecked Sendable {
     private var activeGeneration: UInt64 = 0
     /// Accessed only by callers and delivery closures on the main thread.
     private var deliveryGeneration: UInt64 = 0
+
+    /// Last state handed to `onChange`, owned by `queue`. Kept here rather than
+    /// read back from AppDelegate so the check stays inside the type that knows
+    /// which path produced the read.
+    private var lastEmittedState: TrackingState?
+    /// Consecutive state changes the fallback found before FSEvents did.
+    private var changesMissedByStream = 0
+    /// One miss is a lost race: FSEvents coalesces for `fsEventsLatency` and reads
+    /// are throttled to `minInterval`, so the backstop can legitimately win
+    /// occasionally. Two in a row is not a race — it's a stream that stopped
+    /// delivering, which silently drops detection from ~1 s to ~120 s.
+    private static let missedChangeThreshold = 2
+    /// Rebuilds attempted in this monitoring generation, reset by `start()`.
+    private var streamRestarts = 0
+    /// If three fresh streams all go deaf, the problem is not the stream, and
+    /// rebuilding a fourth just burns wake-ups on a machine that is already
+    /// misbehaving. The 120 s fallback keeps working either way, so the failure
+    /// mode of giving up is slow detection — not no detection. A pause or a
+    /// work-hours boundary starts a new generation and resets this.
+    private static let maxStreamRestarts = 3
 
     /// Directory holding DatabaseModel.sqlite (+ -wal/-shm).
     private let watchDir = FileManager.default.homeDirectoryForCurrentUser
@@ -77,6 +111,33 @@ internal final class TogglWatcher: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         refreshEnabled = true
         activeGeneration = generation
+        streamRestarts = 0
+
+        guard createStreamOnQueue() else {
+            // FSEvents is an *accelerator*, not the source of truth. Losing it
+            // must not leave us blind until the 120 s fallback, so still take one
+            // authoritative read. Note this read is deliberately NOT hoisted
+            // above stream setup: on the success path we must register first and
+            // read second, or a write landing in between is missed.
+            //
+            // Logged because the two modes are otherwise indistinguishable from
+            // the outside: both deliver state, one just does it up to 120 s
+            // late. That ambiguity is exactly what hid the degradation bug.
+            log.notice("watcher armed: fallback only (FSEvents unavailable)")
+            refreshWithoutStream()
+            return
+        }
+        log.notice("watcher armed: FSEvents + 120s fallback")
+        refresh(source: .initial) // after event registration, closing the startup gap
+    }
+
+    /// Build and start the FSEvents stream. Returns false if either step failed,
+    /// leaving `stream` nil and `isRunning` false.
+    ///
+    /// Split out of `startOnQueue` because `restartStreamOnQueue` needs exactly
+    /// this and nothing else — not the generation bump, not the initial read.
+    private func createStreamOnQueue() -> Bool {
+        dispatchPrecondition(condition: .onQueue(queue))
 
         var context = FSEventStreamContext(
             version: 0,
@@ -101,13 +162,7 @@ internal final class TogglWatcher: @unchecked Sendable {
                 Self.fsEventsLatency, // coalesces the WAL write burst
                 FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)
             ) else {
-            // FSEvents is an *accelerator*, not the source of truth. Losing it
-            // must not leave us blind until the 120 s fallback, so still take one
-            // authoritative read. Note this read is deliberately NOT
-            // hoisted above stream setup: on the success path we must register
-            // first and read second, or a write landing in between is missed.
-            refreshWithoutStream()
-            return
+            return false
         }
 
         self.stream = stream
@@ -116,11 +171,44 @@ internal final class TogglWatcher: @unchecked Sendable {
             FSEventStreamInvalidate(stream)
             FSEventStreamRelease(stream)
             self.stream = nil
-            refreshWithoutStream() // same reasoning as the create failure above
-            return
+            return false
         }
         isRunning = true
-        refresh() // initial read, after event registration closes the startup gap
+        return true
+    }
+
+    /// Tear the FSEvents stream down and build a fresh one, in place.
+    ///
+    /// Called only when `noteDelivery` has positive evidence the stream stopped
+    /// delivering. This is deliberately different from the documented "a failed
+    /// stream *setup* isn't retried" trade-off: there, nothing is known and a
+    /// retry would be speculative; here the backstop has caught the stream
+    /// missing real changes twice running, so a restart is the response to
+    /// measured failure rather than a guess.
+    ///
+    /// Generations are untouched — this is the same monitoring session with a
+    /// new stream, so deliveries already in flight stay valid.
+    private func restartStreamOnQueue() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard streamRestarts < Self.maxStreamRestarts else {
+            return // give up rather than churn; the fallback still works
+        }
+        streamRestarts += 1
+        let attempt = streamRestarts
+
+        if let stream {
+            FSEventStreamStop(stream)
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            self.stream = nil
+        }
+        isRunning = false
+
+        if createStreamOnQueue() {
+            log.notice("FSEvents stream rebuilt (attempt \(attempt, privacy: .public))")
+        } else {
+            log.notice("FSEvents stream rebuild failed (attempt \(attempt, privacy: .public)); staying on the 120s fallback")
+        }
     }
 
     /// Read once from `queue` without requiring a live stream. Used by the
@@ -132,12 +220,12 @@ internal final class TogglWatcher: @unchecked Sendable {
     }
 
     /// Backstop re-read (used by the fallback timer in case an event is missed).
-    internal func refresh() {
+    internal func refresh(source: RefreshSource = .fallback) {
         queue.async { [weak self] in
             guard let self else {
                 return
             }
-            emit(generation: activeGeneration, allowWithoutStream: true)
+            emit(generation: activeGeneration, allowWithoutStream: true, source: source)
         }
     }
 
@@ -166,18 +254,68 @@ internal final class TogglWatcher: @unchecked Sendable {
         }
     }
 
-    private func emit(generation: UInt64, allowWithoutStream: Bool = false) {
+    private func emit(
+        generation: UInt64,
+        allowWithoutStream: Bool = false,
+        source: RefreshSource = .event
+    ) {
         guard
             refreshEnabled, activeGeneration == generation,
             allowWithoutStream || isRunning else {
             return
         }
         let state = store.currentState()
+        noteDelivery(state: state, source: source)
         DispatchQueue.main.async { [weak self, onChange] in
             guard let self, deliveryGeneration == generation else {
                 return
             }
             onChange(state)
+        }
+    }
+
+    /// Notice when the backstop, not the stream, is finding the changes.
+    ///
+    /// A state change surfaced by the fallback is by definition one FSEvents
+    /// failed to deliver. The stream can lose an occasional race, so this only
+    /// complains once it happens `missedChangeThreshold` times consecutively —
+    /// at which point the app is running blind on a 120 s timer while reporting
+    /// itself perfectly healthy, which is exactly how this went unnoticed.
+    ///
+    /// Costs one comparison inside a read that already happened: no timer, no
+    /// extra I/O, nothing while idle.
+    private func noteDelivery(state: TrackingState, source: RefreshSource) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        defer { lastEmittedState = state }
+        guard let previous = lastEmittedState, state != previous else {
+            return // first read of a generation, or nothing changed
+        }
+        switch source {
+        case .event:
+            changesMissedByStream = 0 // the stream is delivering
+
+        case .fallback:
+            changesMissedByStream += 1
+            // Bound to a local: os.Logger interpolation is an autoclosure, so a
+            // property read there needs an explicit `self.` — which SwiftFormat's
+            // redundantSelf then strips, and the build fails. Don't reintroduce it.
+            let missed = changesMissedByStream
+            if missed >= Self.missedChangeThreshold {
+                log.notice("""
+                FSEvents appears dead: the 120s fallback has found \
+                \(missed, privacy: .public) consecutive state changes \
+                the stream should have delivered first
+                """)
+                // Reset before restarting, so the next two misses are counted
+                // against the *new* stream. Without this the counter stays over
+                // threshold and every subsequent fallback read would restart
+                // again — a rebuild storm driven by stale evidence.
+                changesMissedByStream = 0
+                restartStreamOnQueue()
+            }
+
+        case .initial:
+            break // a start-up read racing the stream proves nothing
         }
     }
 

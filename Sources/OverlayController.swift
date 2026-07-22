@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import AppKit
 
 // swiftlint:disable redundant_string_enum_value - persisted raw values, see below
@@ -104,8 +105,9 @@ private final class OverlayWindow: NSWindow {
     }
 
     deinit {
-        // Deliberately empty: NSWindow owns its own teardown, and OverlayController
-        // releases these by dropping them from `windows` (see teardown()).
+        // Deliberately empty: NSWindow owns its own teardown. OverlayController
+        // releases these by close()ing them and dropping them from `windows` —
+        // both halves are required, see the comment in teardown().
     }
 
     override var canBecomeKey: Bool {
@@ -240,7 +242,23 @@ internal final class OverlayController {
         beatTimer?.invalidate()
         beatTimer = nil
         for window in windows {
-            window.orderOut(nil)
+            // `close()`, not `orderOut()`. Both take the window off screen, but
+            // NSApplication keeps its own registry of live windows that a window
+            // joins the first time it is ordered on, and **only close() removes
+            // it from that registry**. With orderOut alone, `windows.removeAll()`
+            // drops our reference while AppKit still holds one, so the NSWindow /
+            // NSView / CALayer graph does not deallocate — it lingers until the
+            // *next* show() happens to flush it.
+            //
+            // That lag is not academic here: hide() at the work-hours boundary is
+            // the last overlay call of the day, and the app then idles until the
+            // next morning. Verified against a real NSApplication run loop —
+            // with orderOut, NSApp.windows.count stayed at 1 and deinit never
+            // fired across 33 s of idle; with close() it drops immediately.
+            //
+            // Safe because isReleasedWhenClosed is false (see init): ARC still
+            // owns the reference, close() just makes AppKit release its copy.
+            window.close()
         }
         windows.removeAll()
     }

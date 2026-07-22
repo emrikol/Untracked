@@ -128,6 +128,21 @@ else
     fail=1
 fi
 
+# --- 7. every script with a shebang is executable ---------------------------
+#
+# A script committed without the exec bit fails only where it is *invoked by
+# path*. Locally these get run as `python3 foo.py` or `bash foo.sh` often enough
+# that the missing bit goes unnoticed; CI runs them by path and dies with a bare
+# "Permission denied". That is exactly how the first release run failed, at the
+# appcast step, after signing and notarisation had already succeeded.
+while IFS= read -r script; do
+    head -c2 "$script" 2>/dev/null | grep -q '^#!' || continue
+    if [[ ! -x "$script" ]]; then
+        echo -e "${RED}✗ $script has a shebang but is not executable${NC} — chmod +x it"
+        fail=1
+    fi
+done < <(git ls-files 'scripts/*' 'build.sh' '.githooks/*' 2>/dev/null)
+
 # --- Not gated here, deliberately ------------------------------------------
 #
 # Two CLAUDE.md conventions resist static checking, and a heuristic that cries

@@ -65,18 +65,49 @@ path is to paint **our own** click-through window on top, which is what this doe
   occludes the middle, the flanking red is still clear signal.
 - **Both**.
 
+## Install
+
+Download the latest `Untracked-X.Y.Z.zip` from
+[Releases](https://github.com/emrikol/Untracked/releases), unzip it, and drag
+`Untracked.app` to `/Applications`. Builds are signed with a Developer ID and
+notarised by Apple, so it opens without a Gatekeeper warning.
+
+No setup needed beyond launching it. Click the menu-bar icon → **Launch at
+Login** so it starts with your Mac.
+
+## Updates
+
+Untracked updates itself via [Sparkle](https://sparkle-project.org). Updates are
+signed with an EdDSA key and verified before anything is installed.
+
+Checks are **event-driven, like everything else here** — there is no update
+timer. Untracked piggybacks on wake-ups it already receives (launch, waking from
+sleep, coming back on duty) and checks at most once per six *waking* hours. On a
+machine that is asleep or off-duty, nothing happens at all.
+
+Menu → **Check for Updates…** forces a check and, unlike the background one,
+tells you when you're already up to date.
+
 ## Build
 
-Requires Xcode + [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-(`brew install xcodegen`).
+Requires Xcode and, via Homebrew:
+
+```bash
+brew install xcodegen swiftlint swiftformat shellcheck
+```
+
+All four are required, not optional: `build.sh` runs `scripts/check-invariants.sh`
+first and **fails the build** if any of the linters is missing, so a missing tool
+can't quietly turn the gate into a no-op.
 
 ```bash
 ./build.sh --install   # build, copy to /Applications, launch
 ./build.sh             # just build into ./build.noindex
 ```
 
-No setup needed beyond launching it. Click the menu-bar icon → **Launch at
-Login** so it starts with your Mac.
+The version comes from the newest `vX.Y.Z` git tag — a build from an untagged or
+dirty tree is labelled `-dev`. Run `./scripts/install-hooks.sh` once per clone to
+enable the pre-commit and pre-push gates.
 
 ## Configuration — `~/.untracked.json`
 
@@ -180,4 +211,44 @@ tolerance so wake-ups coalesce. Remaining code-level knobs:
 
 ## Signing
 
-Uses Team `3T9RX85H44`, bundle id `com.emrikol.Untracked`, automatic signing.
+Bundle id `com.emrikol.Untracked`, Team `3T9RX85H44`. Local builds use automatic
+signing; release builds are signed with a Developer ID and notarised by the
+release workflow. Setting `SIGN_IDENTITY` switches `build.sh` to manual signing
+with that identity.
+
+Sparkle ships its nested helpers (two XPC services, `Autoupdate`, `Updater.app`)
+ad-hoc signed, and `xcodebuild` — unlike Xcode's Distribute flow — leaves them
+that way. Notarisation rejects that, so `scripts/sign-sparkle.sh` re-signs them
+inside-out and then re-signs the app; `build.sh` runs it automatically and
+verifies the result with `codesign --verify --deep --strict`.
+
+## Support Policy
+
+**This software is provided as-is, with no support.**
+
+- ✅ You may use, modify, and redistribute it under the
+  [GNU General Public License, version 2 or later](LICENSE).
+- ❌ **No support, bug fixes, or feature requests.**
+- ❌ **Issues are disabled** — please don't contact the maintainer for help.
+- ❌ **Pull requests are accepted only from collaborators** — others are auto-closed.
+- 💡 **To change it, fork it** and adapt it to your needs. The GPL explicitly
+  grants you that right.
+
+### Why this policy?
+
+Untracked is a personal project. It reads two private, undocumented files —
+Toggl Track's local Core Data store and macOS's Do Not Disturb assertions
+database — and either can change without notice in any Toggl or macOS update.
+Supporting every combination of the two is beyond its scope. Both dependencies
+fail safe (see [SECURITY.md](SECURITY.md)), so a break degrades the app rather
+than breaking your machine.
+
+If you redistribute a modified version, please use a **different project name
+and branding** to avoid confusion.
+
+## License
+
+[GNU General Public License v2.0 or later](LICENSE) — `GPL-2.0-or-later`.
+
+Untracked is an independent project and is **not** affiliated with, endorsed by,
+or supported by Toggl OÜ.

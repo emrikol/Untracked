@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import Foundation
 
 /// Loads, persists, and hot-reloads `~/.untracked.json`. The watcher is a

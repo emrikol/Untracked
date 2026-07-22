@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Generates Untracked's app icon as a set of PNGs into an .iconset dir.
 // Concept: a red ECG/heartbeat pulse on a dark rounded square — references the
 // heartbeat nag. Usage: swift make-icon.swift <output.iconset dir>

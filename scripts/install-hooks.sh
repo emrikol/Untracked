@@ -4,4 +4,4 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 git config core.hooksPath .githooks
-echo "✓ core.hooksPath = .githooks  (pre-commit gate active)"
+echo "✓ core.hooksPath = .githooks  (pre-commit gate + pre-push changelog check active)"

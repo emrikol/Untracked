@@ -1,126 +1,79 @@
 # Untracked
 
-**A menu-bar nag for Toggl Track.** A tiny macOS app that flashes a pulsing red
-overlay when you're *not* tracking time — so you stop forgetting to start the
-timer.
+**A menu-bar nag for Toggl Track.** When no timer is running, Untracked flashes a
+pulsing red overlay so you stop forgetting to start one. When a timer is running,
+it gets out of the way.
 
-It reads the Toggl Track desktop app's **local database** (no API token, no
-network), waking only when Toggl writes to it (FSEvents). When nothing is
-running, it shows an unmissable (but click-through, non-blocking) red nag. When
-a timer is running, the nag
-disappears and the menu-bar icon goes green.
+[![Release](https://img.shields.io/github/v/release/emrikol/Untracked)](https://github.com/emrikol/Untracked/releases)
+[![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
+![Platform](https://img.shields.io/badge/macOS-15%2B%20(Apple%20silicon)-lightgrey)
 
-> Untracked is an independent project. It is **not** affiliated with, endorsed by,
-> or supported by Toggl. "Toggl" and "Toggl Track" are trademarks of Toggl
-> and are used here only to identify the application Untracked works with.
+The overlay is click-through, so it never blocks what you're doing. Detection is
+local: Untracked reads the Toggl Track app's own database on your Mac. No API
+token, no account, no network.
 
-## How it detects tracking (local-only)
+*Not affiliated with, endorsed by, or supported by Toggl. "Toggl" and "Toggl
+Track" are trademarks of Toggl, used here only to identify the app this works
+with.*
 
-The Toggl Track app (`com.toggl.daneel`) keeps a Core Data SQLite store — the
-same file its own menu-bar widget reads:
+## Requirements
 
-```
-~/Library/Group Containers/B227VTMZ94.group.com.toggl.daneel.extensions/production/DatabaseModel.sqlite
-```
-
-The **running entry is the single non-deleted row in `ZMANAGEDTIMEENTRY` with a
-NULL duration**. We query the live store **read-only, in place** — in WAL mode
-readers don't block (or get blocked by) Toggl's writer, and SQLite only reads the
-few pages the query needs.
-Reading works **without Full Disk Access** (verified).
-
-> ⚠️ This store is private and undocumented. A Toggl app update could rename the
-> path or change how "running" is encoded, which would break detection. By
-> design that degrades to "data unavailable" (no false nag) — see
-> `Sources/TogglLocalStore.swift` to fix the path/query if it ever happens.
-
-## Footprint (event-driven, no polling)
-
-Detection is driven by **FSEvents** watching Toggl's `production/` directory, so
-the app wakes only when Toggl actually writes to its DB (start/stop/edit a
-timer). A running timer changes nothing on disk, so the app sits idle. FSEvents'
-2s latency coalesces the write burst of a single start/stop into one read; a
-120s high-tolerance fallback timer (`AppDelegate.swift`) is only a backstop for a
-missed event.
-
-The overlay heartbeat is **duty-cycled** (`OverlayController.swift`): a timer
-fires a short ~0.7s beat every 8s by default and the overlay is fully static in between,
-rather than an always-on animation that recomposites every frame.
-
-Measured: idle CPU ≈ 0%, **0 idle wakeups**, physical footprint ≈ 13 MB, ~240 KB
-stripped binary. The CPU and wake-up figures hold both off-duty and while the
-overlay is actively pulsing. The app bundle is ~3.1 MiB, of which
-Sparkle.framework is ~2.8 MiB.
-
-## Why an overlay instead of "flash the title bar"?
-
-macOS won't let one app recolor another app's window chrome — the title bar is
-drawn inside the owning app's own process, and process isolation + code-signing
-enforcement block any cross-app rendering (root doesn't help). The legitimate
-path is to paint **our own** click-through window on top, which is what this does.
-
-## Alert styles (switchable from the menu)
-
-- **Screen Border** — a pulsing red rim around every display.
-  Robust, covers nothing, shows over full-screen apps.
-- **Menu Bar Strip** *(default)* — a pulsing red strip over the menu-bar area. If the notch
-  occludes the middle, the flanking red is still clear signal.
-- **Both**.
+- macOS 15 or later, Apple silicon
+- The [Toggl Track](https://toggl.com/track/) desktop app, signed in
 
 ## Install
 
 Download the latest `Untracked-X.Y.Z.zip` from
-[Releases](https://github.com/emrikol/Untracked/releases), unzip it, and drag
+[Releases](https://github.com/emrikol/Untracked/releases), unzip, and drag
 `Untracked.app` to `/Applications`. Builds are signed with a Developer ID and
-notarised by Apple, so it opens without a Gatekeeper warning.
+notarised by Apple, so they open without a Gatekeeper warning.
 
-No setup needed beyond launching it. Click the menu-bar icon → **Launch at
-Login** so it starts with your Mac.
+Launch it and you're done — it lives in the menu bar, with no Dock icon and no
+setup. Updates install themselves via [Sparkle](https://sparkle-project.org),
+verified against a signing key; **Check for Updates…** in the menu forces a check.
 
-## Updates
+## Alert styles
 
-Untracked updates itself via [Sparkle](https://sparkle-project.org). Updates are
-signed with an EdDSA key and verified before anything is installed.
+| Style | Looks like |
+|---|---|
+| **Menu Bar Strip** *(default)* | A pulsing strip across the menu-bar area |
+| **Screen Border** | A pulsing rim around every display, over full-screen apps too |
+| **Both** | Both at once |
 
-Checks are **event-driven, like everything else here** — there is no update
-timer. Untracked piggybacks on wake-ups it already receives (launch, waking from
-sleep, coming back on duty) and checks at most once per six *waking* hours. On a
-machine that is asleep or off-duty, nothing happens at all.
+Switch from the menu, or set `alertStyle` in the config.
 
-Menu → **Check for Updates…** forces a check and, unlike the background one,
-tells you when you're already up to date.
+## Menu
 
-## Build
+- Live status — tracking, not tracking, paused, or why it's quiet ("Not tracking for 12m")
+- **Open Toggl Track** — focuses the app, or the web timer if it isn't installed
+- **Pause / Resume** — silence it without quitting
+- **Snooze** — 10 / 30 / 60 minutes, for meetings
+- **Alert Style**, **Flash When Tracking / Not Tracking**
+- **Only Nag During Work Hours**, **Respect Focus / Do Not Disturb**
+- **Edit Config…**, **Launch at Login**, **Check for Updates…**
 
-Requires Xcode and, via Homebrew:
+## When it stays quiet
 
-```bash
-brew install xcodegen swiftlint swiftformat shellcheck
-```
+- **You're away** — screen locked, display asleep, or switched user.
+- **Focus / Do Not Disturb is on**, if `respectDoNotDisturb` is set.
+- **Outside your work hours**, if `workHoursEnabled` is set. It idles completely
+  during these — no reads at all — and shows a 🌙 icon.
+- **Paused or snoozed.**
+- **Just after a timer stops** — `gracePeriodSeconds`, so ordinary task-switching
+  doesn't set it off.
+- **When it can't tell.** If Toggl's database is missing or unreadable, the state
+  is *unknown* and it stays silent rather than nagging you wrongly.
 
-All four are required, not optional: `build.sh` runs `scripts/check-invariants.sh`
-first and **fails the build** if any of the linters is missing, so a missing tool
-can't quietly turn the gate into a no-op.
+It nags whenever you aren't tracking on this Mac, including when Toggl is closed
+— closed means not tracking. It also can't see a timer you started only on your
+phone. Pause or quit if that isn't what you want.
 
-```bash
-./build.sh --install   # build, copy to /Applications, launch
-./build.sh             # just build into ./build.noindex
-```
+## Configuration
 
-The version comes from the newest `vX.Y.Z` git tag — a build from an untagged or
-dirty tree is labelled `-dev`. Run `./scripts/install-hooks.sh` once per clone to
-enable the pre-commit and pre-push gates.
-
-## Configuration — `~/.untracked.json`
-
-Auto-created with defaults on first run. Edit it (menu → **Edit Config…**) and
-changes apply **instantly** — the file is hot-reloaded via a kqueue watcher
-(event-driven, zero idle cost). Any key may be omitted; omitted keys use their
-default.
-
-This file is parsed as **strict JSON** — no comments, no trailing commas. (A file
-that fails to parse is ignored and the previous settings are kept.) The defaults,
-safe to copy verbatim:
+`~/.untracked.json`, created on first run. Edit it from the menu
+(**Edit Config…**); changes apply instantly, no restart. Any key may be omitted.
+It's strict JSON — no comments, no trailing commas — and a file that fails to
+parse is ignored, keeping your previous settings.
 
 ```json
 {
@@ -141,116 +94,80 @@ safe to copy verbatim:
 
 | Key | Meaning |
 |-----|---------|
-| `alertStyle` | `"menuBar"` \| `"border"` \| `"both"` |
-| `flashWhenTracking` | green heartbeat while a timer **is** running |
-| `flashWhenNotTracking` | red heartbeat while **not** tracking (the nag) |
-| `trackingColor`, `notTrackingColor` | hex `#RRGGBB` or `#RRGGBBAA` (alpha is honoured by every style) |
-| `beatPeriodSeconds` | seconds between heartbeats |
-| `borderThickness` | px, for the `"border"` style |
-| `gracePeriodSeconds` | wait this long after a timer stops before nagging |
-| `respectDoNotDisturb` | stay quiet while a Focus/DnD is active |
-| `workHoursEnabled` | if `true`, only nag during the window below |
-| `workDays` | `M` `T`(Tue) `W` `R`(Thu) `F` `S`(Sat) `U`(Sun) |
-| `workHours` | local time, `"HH:MM-HH:MM"` |
+| `alertStyle` | `"menuBar"`, `"border"`, or `"both"` |
+| `flashWhenTracking` | Green heartbeat while a timer **is** running |
+| `flashWhenNotTracking` | Red heartbeat while **not** tracking — the nag itself |
+| `trackingColor`, `notTrackingColor` | `#RRGGBB` or `#RRGGBBAA` |
+| `beatPeriodSeconds` | Seconds between heartbeats |
+| `borderThickness` | Pixels, for the `border` style |
+| `gracePeriodSeconds` | Delay after a timer stops before nagging |
+| `respectDoNotDisturb` | Stay quiet during Focus / Do Not Disturb |
+| `workHoursEnabled` | Only nag during the window below |
+| `workDays` | `M` `T`ue `W` `R`hu `F` `S`at `U`n |
+| `workHours` | Local time, `"HH:MM-HH:MM"` |
 
-Both flashes can also be toggled from the menu (**Flash When Tracking** /
-**Flash When Not Tracking**, which write back to this file). Turn off
-`flashWhenTracking` for nag-only; turn off both for a silent, icon-only mode.
-Invalid colors fall back to red/green rather than breaking.
+Turn off `flashWhenTracking` for nag-only; turn off both for a silent,
+icon-only mode. Invalid colours fall back to red and green.
 
-## Menu
+## How it works
 
-- Live status (tracking / not tracking / paused / quiet reason / "Not tracking for 12m")
-- **Open Toggl Track** — focuses the desktop app (falls back to the web timer)
-- **Pause / Resume** — silence indefinitely without quitting
-- **Snooze** — 10 / 30 / 60 min (e.g. during meetings)
-- **Alert Style** — Border / Menu Bar Strip / Both (writes to the JSON config)
-- **Flash When Tracking / Not Tracking** — toggles (write to the JSON config)
-- **Only Nag During Work Hours** — toggles `workHoursEnabled` (shows the window)
-- **Respect Focus / Do Not Disturb** — toggles `respectDoNotDisturb`
-- **Edit Config…** — opens `~/.untracked.json`
-- **Launch at Login**
+Toggl Track keeps a Core Data SQLite store on disk:
 
-## When it stays quiet (no nag)
+```
+~/Library/Group Containers/B227VTMZ94.group.com.toggl.daneel.extensions/production/DatabaseModel.sqlite
+```
 
-- **You're away** — screen locked, display asleep, or session switched out.
-- **Focus / Do Not Disturb is active** (`respectDoNotDisturb`). *Best-effort:*
-  macOS has no usable public Focus API (the official `INFocusStatusCenter` needs
-  a Communication-Notifications entitlement + an auth prompt and can't be
-  subscribed to — only polled). So this reads `~/Library/DoNotDisturb/DB/Assertions.json`
-  via a kqueue watcher (instant, no permissions) and **fails open** — if it
-  can't read it, it nags normally.
-- **Outside work hours** (`workHoursEnabled`) — and during these it fully idles:
-  it stops reading Toggl's DB entirely, shows an off-duty (🌙) menu-bar icon, and
-  wakes once at the next work-hours boundary (a single dated timer, plus
-  wake/clock notifications — no polling). Zero reads all weekend.
-- **Paused** or **snoozed**.
-- **Grace period** — for `gracePeriodSeconds` after a timer stops (so normal
-  task-switching doesn't trigger a flash).
+Untracked reads it directly — read-only, in place, no Full Disk Access needed —
+and treats a non-deleted row with a NULL duration as a running timer. It watches
+that directory with FSEvents, so it wakes only when Toggl writes, and a running
+timer writes nothing. Idle cost is about 13 MB of memory, no measurable CPU, and
+zero wake-ups.
 
-## Behavior notes
+> [!WARNING]
+> That database is private and undocumented, as is the Focus state Untracked
+> reads to stay quiet. A Toggl or macOS update could change either without
+> notice. Both are designed to fail safe: if they break, Untracked goes quiet
+> rather than nagging you incorrectly, and tells you once that it needs a fix.
 
-- Only a **definitive "not tracking"** nags. If the DB is missing/unreadable or
-  Toggl has never run, the state is **unavailable** and it stays quiet. If that
-  happens *while the Toggl app is running* (likely a schema change broke
-  detection), it posts a one-time notification rather than failing silently.
-- It nags whenever you're not tracking, even if the Toggl app is closed (closed =
-  not tracking on this Mac). Pause/snooze/quit if that's not what you want.
-- State is read from *this Mac's* synced data — if you track only on your phone
-  with the Mac app closed, it can't know. (Acceptable for the "I forget at my
-  desk" use case.)
-- Launch-at-login is enabled automatically on first run (toggle it off in the menu).
+macOS won't let one app recolour another app's window, which is why this paints
+its own overlay instead of flashing Toggl's title bar.
 
-## Knobs
+## Build
 
-Most tuning is in `~/.untracked.json` (above). Heartbeats use ±40%
-tolerance so wake-ups coalesce. Remaining code-level knobs:
+Requires Xcode, plus:
 
-- Fallback re-read interval: the 120s `Timer` in `Sources/AppDelegate.swift` (backstop).
-- Overlay window level: `.screenSaver` in `Sources/OverlayController.swift`.
-  Lower to `.statusBar` if you'd rather it not draw over an open menu — at the
-  cost of not showing over full-screen apps.
+```bash
+brew install xcodegen swiftlint swiftformat shellcheck
+```
 
-## Signing
+All four are required — `build.sh` runs the static-analysis gate first and fails
+without them.
 
-Bundle id `com.emrikol.Untracked`, Team `3T9RX85H44`. Local builds use automatic
-signing; release builds are signed with a Developer ID and notarised by the
-release workflow. Setting `SIGN_IDENTITY` switches `build.sh` to manual signing
-with that identity.
+```bash
+./build.sh --install   # build, install to /Applications, launch
+./build.sh             # build only, into ./build.noindex
+```
 
-Sparkle ships its nested helpers (two XPC services, `Autoupdate`, `Updater.app`)
-ad-hoc signed, and `xcodebuild` — unlike Xcode's Distribute flow — leaves them
-that way. Notarisation rejects that, so `scripts/sign-sparkle.sh` re-signs them
-inside-out and then re-signs the app; `build.sh` runs it automatically and
-verifies the result with `codesign --verify --deep --strict`.
+Version numbers come from the newest `vX.Y.Z` git tag; untagged builds are marked
+`-dev`. Run `./scripts/install-hooks.sh` once per clone to enable the commit
+hooks. See [CLAUDE.md](CLAUDE.md) for architecture and design constraints.
 
-## Support Policy
+## Support
 
-**This software is provided as-is, with no support.**
+**Provided as-is, with no support.**
 
-- ✅ You may use, modify, and redistribute it under the
-  [GNU General Public License, version 2 or later](LICENSE).
-- ❌ **No support, bug fixes, or feature requests.**
-- ❌ **Issues are disabled** — please don't contact the maintainer for help.
-- ❌ **Pull requests are accepted only from collaborators** — others are auto-closed.
-- 💡 **To change it, fork it** and adapt it to your needs. The GPL explicitly
-  grants you that right.
+- ✅ Use, modify, and redistribute it under the [GPL v2 or later](LICENSE).
+- ❌ No support, bug fixes, or feature requests. Issues are disabled.
+- ❌ Pull requests are accepted from collaborators only; others are auto-closed.
+- 💡 **To change it, fork it** — the GPL explicitly grants you that right.
 
-### Why this policy?
+This is a personal project built around two undocumented files that can change
+under it at any time, so supporting every combination of Toggl and macOS versions
+isn't something one person can promise. If you redistribute a modified version,
+please rename it to avoid confusion.
 
-Untracked is a personal project. It reads two private, undocumented files —
-Toggl Track's local Core Data store and macOS's Do Not Disturb assertions
-database — and either can change without notice in any Toggl or macOS update.
-Supporting every combination of the two is beyond its scope. Both dependencies
-fail safe (see [SECURITY.md](SECURITY.md)), so a break degrades the app rather
-than breaking your machine.
-
-If you redistribute a modified version, please use a **different project name
-and branding** to avoid confusion.
+Security reporting: [SECURITY.md](SECURITY.md).
 
 ## License
 
 [GNU General Public License v2.0 or later](LICENSE) — `GPL-2.0-or-later`.
-
-Untracked is an independent project and is **not** affiliated with, endorsed by,
-or supported by Toggl.

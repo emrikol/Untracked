@@ -94,7 +94,8 @@ if command -v swiftlint >/dev/null 2>&1; then
         fail=1
     fi
 else
-    echo -e "${YELLOW}  ! swiftlint not installed — skipping (brew install swiftlint)${NC}"
+    echo -e "${RED}✗ swiftlint not installed${NC} — brew install swiftlint"
+    fail=1
 fi
 
 # --- 5. SwiftFormat ---------------------------------------------------------
@@ -107,7 +108,8 @@ if command -v swiftformat >/dev/null 2>&1; then
         fail=1
     fi
 else
-    echo -e "${YELLOW}  ! swiftformat not installed — skipping (brew install swiftformat)${NC}"
+    echo -e "${RED}✗ swiftformat not installed${NC} — brew install swiftformat"
+    fail=1
 fi
 
 # --- 6. shellcheck ----------------------------------------------------------
@@ -122,7 +124,8 @@ if command -v shellcheck >/dev/null 2>&1; then
         fail=1
     fi
 else
-    echo -e "${YELLOW}  ! shellcheck not installed — skipping (brew install shellcheck)${NC}"
+    echo -e "${RED}✗ shellcheck not installed${NC} — brew install shellcheck"
+    fail=1
 fi
 
 # --- Not gated here, deliberately ------------------------------------------

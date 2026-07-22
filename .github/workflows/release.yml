@@ -1,0 +1,259 @@
+name: Release
+
+# Pushing a vX.Y.Z tag is the only thing that publishes. The tag is also the
+# only source of the version (see scripts/version.sh) — nothing in the repo
+# records it, so there is no bump commit to forget.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write # create the Release, and push the appcast to gh-pages
+
+jobs:
+  release:
+    # Must track the toolchain used locally: SWIFT_TREAT_WARNINGS_AS_ERRORS is on,
+    # so a newer compiler's *new warning* is a build failure here even though the
+    # code is unchanged. Bump this together with the dev machine, not before it.
+    runs-on: macos-26
+
+    steps:
+      # Third-party actions are pinned by commit SHA, not by tag: a tag is
+      # mutable, and these actions run with contents:write and see the signing
+      # keychain's process environment. The version each SHA corresponds to is in
+      # the trailing comment so upgrades stay reviewable.
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # scripts/version.sh runs `git describe --tags`; a shallow clone has no
+          # tags, so the version would silently fall back to 0.0.0.
+          fetch-depth: 0
+
+      - name: Install build and gate tooling
+        # check-invariants.sh hard-fails when any of these is missing (it used to
+        # skip, which meant CI silently enforced nothing).
+        run: brew install xcodegen swiftlint swiftformat shellcheck
+
+      - name: Confirm the tag and the CHANGELOG agree
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          # REQUIRE_TAG makes version.sh refuse anything that is not a clean,
+          # tagged checkout, so a release can never be cut from a dirty tree.
+          read -r MARKETING BUILD <<<"$(REQUIRE_TAG=1 scripts/version.sh)"
+          if [[ "$MARKETING" != "$VERSION" ]]; then
+            echo "::error::tag $TAG disagrees with derived version $MARKETING"
+            exit 1
+          fi
+          # The pre-push hook checks this too, but hooks live on developer
+          # machines and can be bypassed with --no-verify. This is the copy that
+          # actually gates publication.
+          if ! grep -qE "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no dated '## [$VERSION] - YYYY-MM-DD' section"
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "build=$BUILD"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION (build $BUILD) from $TAG"
+
+      - name: Import the Developer ID certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # A dedicated keychain, deleted in the always() step below, so the cert
+          # never persists on a runner and never lands in the default keychain.
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          # Auto-lock would otherwise fire mid-notarisation on a slow run.
+          security set-keychain-settings -t 3600 -u build.keychain
+
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -k build.keychain -P "$MACOS_CERTIFICATE_PWD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$CERT_PATH"
+          # Without this, codesign blocks on a GUI keychain-access prompt that
+          # nobody can answer, and the job hangs until it times out.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain \
+            | awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [[ -z "$IDENTITY" ]]; then
+            echo "::error::no Developer ID Application identity in the imported certificate"
+            security find-identity -v -p codesigning build.keychain
+            exit 1
+          fi
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "Signing as: $IDENTITY"
+
+      - name: Build, gate and sign
+        # build.sh runs check-invariants.sh (SwiftLint --strict, SwiftFormat,
+        # shellcheck, invariants) before anything else, signs Sparkle's nested
+        # helpers, and asserts the version reached the bundle. SIGN_IDENTITY
+        # switches it from automatic to manual signing.
+        env:
+          # build.sh calls version.sh again, and by then xcodegen and the icon
+          # generator have run. Both write only gitignored files today — but if
+          # that ever stops being true, version.sh would quietly return a `-dev`
+          # version and this job would publish an appcast advertising
+          # "1.0.0-dev". REQUIRE_TAG turns that into a build failure instead.
+          REQUIRE_TAG: "1"
+        run: ./build.sh
+
+      - name: Notarise and staple
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP="build.noindex/Build/Products/Release/Untracked.app"
+
+          # ditto --keepParent, not `zip`: zip mangles symlinks and resource
+          # forks inside a framework bundle, and Sparkle.framework has both.
+          # This archive is for the notary only; the shipped one is made after
+          # stapling, below.
+          ditto -c -k --keepParent "$APP" notarize.zip
+
+          # --wait blocks until Apple returns a verdict, so a rejection fails the
+          # job here rather than producing a release nobody can open.
+          if ! xcrun notarytool submit notarize.zip \
+              --apple-id "$NOTARY_APPLE_ID" \
+              --team-id "$NOTARY_TEAM_ID" \
+              --password "$NOTARY_PASSWORD" \
+              --wait --timeout 30m; then
+            echo "::error::notarisation failed — full log follows"
+            xcrun notarytool history --apple-id "$NOTARY_APPLE_ID" \
+              --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" || true
+            exit 1
+          fi
+
+          # Staple the ticket into the bundle so first launch works offline.
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+
+          # Prove Gatekeeper accepts it before publishing, rather than finding
+          # out from the first user who downloads it.
+          spctl --assess --type execute --verbose=4 "$APP"
+
+          # Re-archive AFTER stapling — the notarised zip does not contain the
+          # ticket, and shipping that one is the classic mistake here.
+          ditto -c -k --keepParent "$APP" "Untracked-${{ steps.version.outputs.version }}.zip"
+          rm -f notarize.zip
+
+      - name: Sign the update and build the appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          BIN="build.noindex/SourcePackages/artifacts/sparkle/Sparkle/bin"
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          # generate_appcast reads the archives in a folder and emits an item per
+          # archive, signing each with the EdDSA key. Only this release's archive
+          # is present, so it produces exactly one item; past releases come from
+          # the published appcast in the merge step below.
+          mkdir -p releases
+          cp "Untracked-$VERSION.zip" releases/
+
+          # The key arrives on stdin (`--ed-key-file -`) so it is never written
+          # to disk and never appears in the process table.
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$BIN/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/emrikol/Untracked/releases/download/$TAG/" \
+            releases/
+
+          # Carry forward whatever is already published. A 404 is the expected
+          # first-release case and must not fail the job; any other curl failure
+          # would silently drop history, so it is fatal.
+          if curl -fsS -o old-appcast.xml "https://emrikol.github.io/Untracked/appcast.xml"; then
+            scripts/merge-appcast.py releases/appcast.xml old-appcast.xml appcast.xml
+          else
+            status=$?
+            if [[ "$status" -eq 22 ]]; then
+              echo "no published appcast yet — first release"
+              scripts/merge-appcast.py releases/appcast.xml - appcast.xml
+            else
+              echo "::error::could not fetch the published appcast (curl exit $status)"
+              exit 1
+            fi
+          fi
+
+          # The appcast is the file that decides whether anyone gets this update.
+          # Print it: it is small, and it is the first thing to look at when an
+          # update fails to appear.
+          cat appcast.xml
+
+      - name: Extract the release notes
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          # Everything between this version's heading and the next one. The
+          # heading itself is dropped; the Release already shows the version.
+          awk -v v="## [$VERSION]" '
+            index($0, v) == 1 { flag = 1; next }
+            /^## \[/          { flag = 0 }
+            flag' CHANGELOG.md > release_notes.md
+          # The version step already proved the section exists, so an empty file
+          # here means the section exists but has no content — still worth
+          # failing on, because it would publish a release with blank notes.
+          if [[ ! -s release_notes.md ]]; then
+            echo "::error::CHANGELOG section for $VERSION is empty"
+            exit 1
+          fi
+          cat release_notes.md
+
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: Untracked-${{ steps.version.outputs.version }}.zip
+          body_path: release_notes.md
+          draft: false
+          # Sparkle can serve pre-releases from a separate channel; until then
+          # marking them keeps them out of "Latest release".
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
+
+      - name: Stage the Pages content
+        # Only the appcast is published from here. keep_files below preserves
+        # anything else already on the branch, so this directory deliberately
+        # contains exactly the one file this job owns.
+        run: |
+          set -euo pipefail
+          mkdir -p gh-pages-content
+          cp appcast.xml gh-pages-content/
+
+      - name: Publish the appcast to GitHub Pages
+        # Last, deliberately: the appcast points at the Release's download URL,
+        # so publishing it before the Release exists would advertise an update
+        # that 404s for anyone who checks in between.
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./gh-pages-content
+          publish_branch: gh-pages
+          # keep_files preserves anything else served from Pages (a landing
+          # page, for instance) instead of replacing the branch wholesale.
+          keep_files: true
+          enable_jekyll: false
+          user_name: "github-actions[bot]"
+          user_email: "github-actions[bot]@users.noreply.github.com"
+          commit_message: "Publish appcast for ${{ steps.version.outputs.tag }}"
+
+      - name: Remove the signing keychain
+        # always(): a failed build must not leave a Developer ID key unlocked on
+        # a runner, even though the runner is ephemeral.
+        if: always()
+        run: |
+          security delete-keychain build.keychain || true
+          security default-keychain -s login.keychain-db || true

@@ -1,0 +1,305 @@
+# Strict by intent, not by count.
+#
+# All of SwiftLint's default rules are on, plus every opt-in rule that detects a
+# *defect*, a *complexity problem*, or a *non-modern idiom*. What's excluded is
+# listed at the bottom with reasons — almost entirely brace/whitespace/ordering
+# rules that SwiftFormat already owns (it runs here as an editor hook), plus a
+# handful of dogma rules that would fight this codebase's deliberate style.
+#
+# Enabling all 150 opt-in rules produces ~894 violations, ~700 of which are pure
+# formatting. That is not "stricter" in any useful sense — it is a linter you
+# learn to scroll past. Everything below is expected to sit at zero.
+#
+# Adding a `// swiftlint:disable` is a decision, not a convenience: annotate it
+# with why, the same way `// wall-clock:` justifies civil-time arithmetic.
+
+included:
+  - Sources
+
+opt_in_rules:
+  # --- Crash / correctness risk --------------------------------------------
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - unowned_variable_capture
+  - discarded_notification_center_observer
+  - identical_operands
+  - unhandled_throwing_task
+  - unneeded_escaping
+  - return_value_from_void_function
+  - overridden_super_call
+  - prohibited_super_call
+  - weak_delegate
+  - strong_iboutlet
+  - yoda_condition
+  - empty_count
+  - empty_string
+  - empty_collection_literal
+  - nslocalizedstring_key
+  - discouraged_assert
+  - fatal_error_message
+  - unavailable_function
+  - untyped_error_in_catch
+  - self_binding
+
+  # --- Concurrency ----------------------------------------------------------
+  # Complements SWIFT_STRICT_CONCURRENCY=complete, which is the real gate.
+  - async_without_await
+  - incompatible_concurrency_annotation
+
+  # --- Dead weight ----------------------------------------------------------
+  - unused_parameter
+  - redundant_nil_coalescing
+  - redundant_type_annotation
+  - redundant_self
+  - superfluous_else
+  - direct_return
+  - convenience_type
+  - explicit_init
+  - unneeded_parentheses_in_closure_argument
+  - unneeded_throws_rethrows
+  - no_empty_block
+
+  # --- Modern / safer idioms ------------------------------------------------
+  - first_where
+  - last_where
+  - contains_over_filter_count
+  - contains_over_filter_is_empty
+  - contains_over_first_not_nil
+  - contains_over_range_nil_comparison
+  - flatmap_over_map_reduce
+  - reduce_into
+  - sorted_first_last
+  - array_init
+  - joined_default_parameter
+  - legacy_multiple
+  - legacy_objc_type
+  - toggle_bool
+  - prefer_key_path
+  - prefer_zero_over_explicit_init
+  - prefer_self_in_static_references
+  - prefer_self_type_over_type_of_self
+  - prefer_condition_list
+  - optional_enum_case_matching
+  - pattern_matching_keywords
+  - shorthand_optional_binding
+  - shorthand_argument
+  - static_operator
+  - comma_inheritance
+  - discouraged_none_name
+  - discouraged_optional_boolean
+  - discouraged_optional_collection
+  - enum_case_associated_values_count
+  - function_default_parameter_at_end
+  - fallthrough
+  - local_doc_comment
+  - period_spacing
+  - modifier_order
+  - lower_acl_than_parent
+  - non_overridable_class_declaration
+  - file_name_no_space
+  - expiring_todo
+
+  # --- Verified at zero, so free ---------------------------------------------
+  # Measured individually before enabling. Several of these were written off as
+  # "dogma" on a first pass; they cost nothing, and missing_docs sitting at zero
+  # says the documentation habit is already there and worth locking in.
+  - missing_docs
+  - todo
+  - strict_fileprivate
+  - discouraged_object_literal
+  - no_extension_access_modifier
+  - override_in_extension
+  - implicit_return
+  - file_header
+  - file_name
+
+  # Raw values reach the user's config file: Settings persists `alertStyle` as
+  # AlertStyle's rawValue. With implicit raw values the case *name* is the
+  # stored string, so renaming a case silently invalidates every existing
+  # ~/.untracked.json. Spelling them out makes that rename a compile-time
+  # decision instead of a silent data migration.
+  - explicit_enum_raw_value
+
+  # Every tuning constant in this app is an energy decision (fallback interval,
+  # FSEvents latency, beat tolerance, retry backoff), so the ones that matter now
+  # have names. The single exemption is the #RRGGBBAA parser, where the numbers
+  # are the format itself.
+  - no_magic_numbers
+
+  # Not tidiness: this app's classes own FSEvent streams, kqueue descriptors and
+  # selector-based observers, and none of them had a deinit. TogglWatcher's
+  # FSEvents context holds an *unretained* self pointer, so a stream outliving
+  # the watcher calls into freed memory — the rule forces that question to be
+  # answered per class, and answering it found exactly that hazard.
+  - required_deinit
+
+  # Omitting an access modifier silently means `internal`, which in a
+  # single-module app is "visible to everything". This app has thread-confined
+  # types whose correctness depends on nobody reaching in from the wrong
+  # context, so exposure should be a decision rather than a default. Turning
+  # this on found nine members that were needlessly visible — isRunning, the
+  # three away-state flags, isVisible, and the singleton-lock globals — all now
+  # private.
+  - explicit_acl
+  - explicit_top_level_acl
+
+  # --- Not applicable today, enabled anyway ---------------------------------
+  # No tests, no SwiftUI, no Interface Builder — so these are no-ops right now.
+  # They cost nothing and mean the rules are already in force the day any of
+  # that arrives, rather than being remembered later.
+  - balanced_xctest_lifecycle
+  - empty_xctest_method
+  - final_test_case
+  - single_test_class
+  - test_case_accessibility
+  - xct_specific_matcher
+  - quick_discouraged_call
+  - quick_discouraged_focused_test
+  - quick_discouraged_pending_test
+  - nimble_operator
+  - prefer_nimble
+  - accessibility_label_for_image
+  - accessibility_trait_for_button
+  - private_swiftui_state
+  - private_action
+  - private_outlet
+  - prohibited_interface_builder
+  - ibinspectable_in_extension
+  - nslocalizedstring_require_bundle
+  - prefer_asset_symbols
+  - private_subject
+  - raw_value_for_camel_cased_codable_enum
+  - closure_body_length
+
+  # --- Layout ---------------------------------------------------------------
+  # SwiftFormat *produces* these; SwiftLint *verifies* them. That only works
+  # because .swiftformat is pinned in-repo and configured to agree — before it
+  # existed these were real conflicts, which is why they were off. Verified at
+  # zero after a format pass. If one starts failing, the fix is almost always a
+  # .swiftformat setting, not a disable here.
+  - closure_end_indentation
+  - closure_spacing
+  - collection_alignment
+  - literal_expression_end_indentation
+  - multiline_arguments_brackets
+  - multiline_function_chains
+  - multiline_literal_brackets
+  - multiline_parameters
+  - multiline_parameters_brackets
+  - operator_usage_whitespace
+  - vertical_parameter_alignment_on_call
+  - vertical_whitespace_closing_braces
+  - vertical_whitespace_opening_braces
+  - anonymous_argument_in_multiline_closure
+  - trailing_closure
+  - conditional_returns_on_newline
+  - vertical_whitespace_between_cases
+  - indentation_width
+  - switch_case_on_newline
+  - multiline_arguments
+  - multiline_call_arguments
+  - let_var_whitespace
+  - number_separator
+  - attributes
+  - sorted_imports
+
+# Require a compiled module, so they run under `swiftlint analyze` only.
+analyzer_rules:
+  - capture_variable
+  - typesafe_array_init
+  - unused_declaration
+  - unused_import
+
+# --- Complexity budgets ------------------------------------------------------
+# Not style. A function or type that outgrows these is one nobody re-reads
+# before editing — which is how the same clock-rollback bug reached a third site.
+cyclomatic_complexity:
+  warning: 12
+  error: 20
+function_body_length:
+  warning: 60
+  error: 100
+type_body_length:
+  warning: 300
+  error: 400
+file_length:
+  warning: 700
+  error: 900
+  ignore_comment_only_lines: true
+closure_body_length:
+  warning: 40
+  error: 60
+line_length:
+  warning: 130
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+identifier_name:
+  # Short names are fine in tight numeric/parsing scopes (h, m, t, a, b); the
+  # value of this rule here is the naming *convention*, not the length.
+  min_length: 1
+  excluded: [id, db, ws, fmt]
+
+redundant_type_annotation:
+  # Also flag `let x: Int = 5`, where the annotation restates the literal's
+  # default type. Strictly more than the default behaviour, and free here.
+  consider_default_literal_types_redundant: true
+
+indentation_width:
+  # The SQL literal in TogglLocalStore is indented for SQL readability; you
+  # cannot re-indent it without changing the string's contents.
+  include_multiline_strings: false
+  include_comments: false
+
+nesting:
+  type_level: 2
+
+# --- Deliberately excluded ---------------------------------------------------
+# --- Mutually exclusive pairs -------------------------------------------------
+# Several SwiftLint rules are direct inverses. Enabling both halves is worse than
+# enabling neither: whichever way the code is written, one of them fires, and
+# there is no passing state. Each pair below is resolved toward the more durable
+# option — the one the wider ecosystem and SwiftFormat already produce, so it
+# survives tooling upgrades without config gymnastics.
+#
+#   opening_brace            > contrasted_opening_brace
+#       Idiomatic Swift and SwiftFormat's native output. The inverse needs
+#       --allman and fights every snippet you paste.
+#   redundant_type_annotation > explicit_type_interface
+#       A default rule, aligned with type inference. Hardened further below with
+#       consider_default_literal_types_redundant.
+#   redundant_self           > explicit_self
+#       No safety is lost: Swift already *requires* explicit self in escaping
+#       closures, so the `self.` that carries meaning is compiler-enforced.
+#       redundant_self only strips the ones that say nothing.
+#   no_extension_access_modifier > extension_access_modifier
+#       Per-member modifiers are explicit, and avoid the `private extension`
+#       subtlety where members end up file-visible rather than type-private.
+#   discouraged_object_literal   > object_literal
+#       #colorLiteral is Xcode-editor magic: invisible in diffs and review, and
+#       unreadable outside Xcode. Initialisers survive everywhere.
+#
+# explicit_enum_raw_value vs redundant_string_enum_value is the exception: both
+# stay ON, because they only collide on one declaration. See AlertStyle, where
+# the disable is region-scoped and superfluous_disable_command polices it.
+
+disabled_rules:
+  # The one true conflict. SwiftLint ships two mutually exclusive brace rules:
+  # `opening_brace` (a default, and now passing) wants `{` on the declaration
+  # line; `contrasted_opening_brace` wants it on its own line. Satisfying the
+  # latter means Allman braces throughout — and it alone accounted for 298 of the
+  # ~894 violations that "enable everything" produced. Noise, not debt.
+  - contrasted_opening_brace
+  - extension_access_modifier  # see the pair note below
+  - object_literal             # see the pair note below
+  - file_types_order           # Settings.swift deliberately pairs the model with its store
+  - sorted_enum_cases          # alphabetising cases hurts more than it helps
+
+  # Dogma that would make this codebase worse, not safer.
+  - explicit_type_interface     # `let x: Int = 5` everywhere; hurts readability
+  - explicit_self               # redundant_self covers the useful direction
+  - prefixed_toplevel_constant  # `k`-prefixing is an Objective-C artifact
+  - type_contents_order         # prescribes member ordering
+  - one_declaration_per_file    # small related types share a file by design
+  - no_grouping_extension       # extensions group things deliberately here

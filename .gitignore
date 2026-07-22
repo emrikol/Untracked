@@ -1,0 +1,15 @@
+# Build artifacts (generated). ".noindex" suffix keeps the tree out of Spotlight.
+build/
+build.noindex/
+*.xcodeproj/
+.DS_Store
+Resources/AppIcon.icns
+
+# Quality-playbook audit artifacts + vendored tooling (local only)
+quality/
+reference_docs/
+docs_gathered/
+**/docs_gathered/
+.claude/skills/quality-playbook/
+.claude/settings.local.json
+build-tsan.noindex/

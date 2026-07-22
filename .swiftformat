@@ -1,0 +1,70 @@
+# SwiftFormat owns layout. Pinned here so the canonical style lives in the repo
+# rather than in whatever editor hook happens to be installed — without this file
+# a machine without the hook formats differently and nothing notices.
+#
+# Division of labour with SwiftLint (.swiftlint.yml):
+#   SwiftFormat  — whitespace, braces, wrapping, import order. Runs with --fix.
+#   SwiftLint    — defects, complexity, dead weight, idioms. Never reformats.
+# Where the two could overlap, this file is configured so SwiftLint's *default*
+# formatting rules pass, and SwiftLint's opt-in formatting rules stay off.
+#
+# Note on braces: SwiftLint ships two mutually exclusive rules. `opening_brace`
+# (a default) wants `{` on the declaration line; `contrasted_opening_brace`
+# (opt-in) wants it on its own line. They cannot both be satisfied. We keep the
+# default, idiomatic-Swift one — which is also why ~298 of the "violations" from
+# enabling every opt-in rule were noise rather than debt.
+
+--swiftversion 5.0
+--indent 4
+--maxwidth 130          # matches line_length in .swiftlint.yml
+
+# Keep `{` on the signature line even when the signature wraps, so SwiftLint's
+# default opening_brace rule passes. This is the one setting that was silently
+# disagreeing with SwiftLint before.
+
+# Wrapping
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--closingparen balanced
+
+# Redundancy — these mirror SwiftLint rules we enable, so --fix resolves them.
+--self remove
+--stripunusedargs closure-only
+
+# Keep the diff honest: don't rewrite comments or reorder declarations.
+
+# Satisfy SwiftLint's `attributes` rule: @objc/@MainActor on their own line for
+# funcs and types, inline for vars.
+--funcattributes prev-line
+--typeattributes prev-line
+--varattributes same-line
+
+# Satisfy SwiftLint's `vertical_whitespace_between_cases`.
+
+# Satisfy SwiftLint's `conditional_returns_on_newline` and friends: inline
+# conditional bodies get wrapped onto their own line.
+
+# Wrapped `guard`/`if` conditions indent by one level instead of aligning under
+# the first condition, so every line stays a multiple of the indent width
+# (SwiftLint's `indentation_width`).
+--wrapconditions before-first
+
+# SwiftFormat's numberFormatting was stripping the underscores SwiftLint's
+# `number_separator` requires. Group decimals from four digits up so both agree.
+--decimalgrouping 3,4
+
+# SwiftFormat's redundantRawValues strips raw values that match the case name —
+# exactly what SwiftLint's `explicit_enum_raw_value` requires. These raw values
+# reach the user's config file on disk, so being explicit is the point.
+
+# redundantInternal, redundantExtensionACL and extensionAccessControl all strip explicit `internal`,
+# which explicit_acl requires. With redundantRawValues and numberFormatting that
+# makes five SwiftFormat rules that silently undo a SwiftLint requirement — this
+# is the first place to look when a lint rule refuses to stay satisfied.
+#
+# NOTE: SwiftFormat keeps only the LAST --disable / --enable line, so these must
+# be single comma-separated lists. Splitting them across lines silently drops all
+# but the final one — which is how explicit enum raw values kept getting stripped.
+--disable wrapMultilineStatementBraces,wrapEnumCases,organizeDeclarations,blankLinesAroundMark,redundantRawValues,redundantInternal,redundantExtensionACL,extensionAccessControl
+--enable sortImports,blankLineAfterSwitchCase,wrapConditionalBodies,wrapLoopBodies,consistentSwitchCaseSpacing

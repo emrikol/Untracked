@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-22
+
+First public release. Pre-1.0 on purpose: the two private files it depends on
+(Toggl's local database and macOS's Focus assertions) have no API and could
+change under it at any time, so the version should say "this is new" until it
+has survived contact with other people's machines.
+
 ### Added
 
 - Menu-bar nag: a pulsing, click-through overlay whenever a Toggl Track timer
@@ -31,13 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (launch, wake, resume from off-duty) rather than a repeating timer, and at
   most once per six waking hours. Sparkle's own scheduler stays disabled.
 - "Check for Updates…" in the menu for an on-demand check.
-
-### Fixed
-
-- Detection could silently degrade from ~1 s to ~120 s when the FSEvents stream
-  stopped delivering: the fallback timer masked it, so the only symptom was a
-  nag appearing while a timer was genuinely running. The watcher now notices
-  when the backstop — not the stream — is finding state changes, and rebuilds
-  the stream.
-- Overlay windows were ordered out but not closed on hide, so AppKit's own
-  window registry kept them alive until the next time the overlay was shown.
+- Self-healing detection: if the FSEvents stream stops delivering, the 120 s
+  backstop notices it is the one finding state changes and rebuilds the stream,
+  rather than silently leaving detection 120 s slow.

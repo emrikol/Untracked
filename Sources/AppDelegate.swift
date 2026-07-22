@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 import AppKit
 import Foundation
 import os
@@ -39,6 +40,10 @@ internal final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     private lazy var watcher = TogglWatcher { [weak self] state in
         MainActor.assumeIsolated { self?.apply(state) }
     }
+
+    /// Lazy so the updater (and Sparkle's XPC helpers) aren't touched until the
+    /// first check is actually due.
+    private lazy var updater = Updater()
 
     private var fallback: Timer?
     private var graceTimer: Timer?
@@ -143,6 +148,10 @@ internal final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     @objc
     private func systemMaybeChanged() {
         updateMonitoring()
+        // Wake/clock/timezone changes are the app's natural heartbeat — a laptop
+        // delivers at least one a day. Reusing them is what lets the updater own
+        // no timer of its own; `checkIfDue` throttles, so calling it here is free.
+        updater.checkIfDue()
     }
 
     // MARK: Monitoring lifecycle (the "do nothing during quiet hours" logic)
@@ -163,6 +172,7 @@ internal final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
             suppression.start()
             watcher.start() // registers first, then performs an authoritative read
             startFallback()
+            updater.checkIfDue() // coming back on duty is a wake-up we already have
         } else if !shouldMonitor, monitoring {
             monitoring = false
             suppression.stop()
@@ -436,12 +446,27 @@ extension AppDelegate {
         menu.addItem(respectDndItem)
         menu.addItem(.separator())
 
+        appendUtilityItems(to: menu)
+        statusItem.menu = menu
+    }
+
+    /// Config, login, updates, quit. Split out of `setupStatusItem` only to keep
+    /// that function under the body-length limit — no behavioural grouping meant.
+    private func appendUtilityItems(to menu: NSMenu) {
         let editConfig = NSMenuItem(title: "Edit Config…", action: #selector(openConfig), keyEquivalent: ",")
         editConfig.target = self
         menu.addItem(editConfig)
 
         loginItem.target = self
         menu.addItem(loginItem)
+
+        let checkUpdates = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        checkUpdates.target = self
+        menu.addItem(checkUpdates)
         menu.addItem(.separator())
 
         menu.addItem(NSMenuItem(
@@ -449,8 +474,6 @@ extension AppDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
-
-        statusItem.menu = menu
     }
 
     private func updateStatusItem() {
@@ -644,6 +667,13 @@ extension AppDelegate {
     @objc
     private func openConfig() {
         NSWorkspace.shared.open(config.fileURL)
+    }
+
+    /// Explicit user request — unlike the event-driven path, this ignores the
+    /// throttle and shows Sparkle's UI, including "you're already up to date".
+    @objc
+    private func checkForUpdates() {
+        updater.checkNow()
     }
 
     @objc

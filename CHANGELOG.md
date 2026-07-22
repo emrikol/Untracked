@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-22
+
+### Fixed
+
+- Launching outside work hours (or while paused) skipped the update check
+  entirely: it only ran from the resume branch of the monitoring lifecycle, so
+  an app started at 6pm would not ask about updates until the machine slept or
+  the next work day began. Launch is itself a wake-up, so it now checks there
+  too — still throttled, still no timer.
+
 ## [0.1.0] - 2026-07-22
 
 First public release. Pre-1.0 on purpose: the two private files it depends on

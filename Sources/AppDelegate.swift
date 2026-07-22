@@ -126,6 +126,15 @@ internal final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         }
 
         updateMonitoring() // starts the watcher unless we launch into quiet hours
+
+        // Launch is itself a wake-up, so check here too — not only from the
+        // resume branch inside updateMonitoring(). Launching *off duty* (after
+        // hours, or paused) otherwise skips that branch entirely, so the app
+        // would sit for hours without ever asking about updates: install it at
+        // 6pm and nothing happens until the machine sleeps or the next work day
+        // starts. `checkIfDue` throttles, so the duplicate call when we do
+        // launch on duty is free.
+        updater.checkIfDue()
     }
 
     deinit {

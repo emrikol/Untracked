@@ -11,7 +11,7 @@ a timer is running, the nag
 disappears and the menu-bar icon goes green.
 
 > Untracked is an independent project. It is **not** affiliated with, endorsed by,
-> or supported by Toggl OÜ. "Toggl" and "Toggl Track" are trademarks of Toggl OÜ
+> or supported by Toggl. "Toggl" and "Toggl Track" are trademarks of Toggl
 > and are used here only to identify the application Untracked works with.
 
 ## How it detects tracking (local-only)
@@ -47,8 +47,10 @@ The overlay heartbeat is **duty-cycled** (`OverlayController.swift`): a timer
 fires a short ~0.7s beat every 8s by default and the overlay is fully static in between,
 rather than an always-on animation that recomposites every frame.
 
-Measured: idle CPU ≈ 0%, resident private memory ≈ 18 MB, ~222 KB stripped
-binary.
+Measured: idle CPU ≈ 0%, **0 idle wakeups**, physical footprint ≈ 13 MB, ~240 KB
+stripped binary. The CPU and wake-up figures hold both off-duty and while the
+overlay is actively pulsing. The app bundle is ~3.1 MiB, of which
+Sparkle.framework is ~2.8 MiB.
 
 ## Why an overlay instead of "flash the title bar"?
 
@@ -251,4 +253,4 @@ and branding** to avoid confusion.
 [GNU General Public License v2.0 or later](LICENSE) — `GPL-2.0-or-later`.
 
 Untracked is an independent project and is **not** affiliated with, endorsed by,
-or supported by Toggl OÜ.
+or supported by Toggl.
